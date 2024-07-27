@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>좀비특공대</title>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background-color: #1a202c;
+      color: #ffffff;
+    }
+
+    #gameContainer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .game-info {
+      position: absolute;
+      font-size: 14px;
+      color: #fff;
+      text-shadow: 1px 1px 2px #000;
+    }
+
+    #energyDisplay {
+      top: 10px;
+      left: 10px;
+    }
+
+    #bombDisplay {
+      top: 30px;
+      left: 10px;
+    }
+
+    #weaponDisplay {
+      top: 50px;
+      left: 10px;
+    }
+
+    #scoreDisplay {
+      top: 10px;
+      right: 10px;
+    }
+
+    #timerDisplay {
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    #levelDisplay {
+      top: 30px;
+      right: 10px;
+    }
+
+    #joystick {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      width: 100px;
+      height: 100px;
+      background-color: rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      display: none;
+    }
+
+    #joystickKnob {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      background-color: rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    #bombButton {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 60px;
+      height: 60px;
+      background-color: rgba(255, 255, 255, 0.5);
+      border: none;
+      border-radius: 50%;
+      font-size: 20px;
+      display: none;
+    }
+
+    #notification {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      color: #fff;
+      text-shadow: 2px 2px 4px #000;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+    <div id="energyDisplay" class="game-info">에너지: 3</div>
+    <div id="bombDisplay" class="game-info">폭탄: 3</div>
+    <div id="weaponDisplay" class="game-info">무기: 일반</div>
+    <div id="scoreDisplay" class="game-info">점수: 0</div>
+    <div id="timerDisplay" class="game-info">00:00</div>
+    <div id="levelDisplay" class="game-info">레벨: 1</div>
+    <div id="joystick">
+      <div id="joystickKnob"></div>
+    </div>
+    <button id="bombButton">💣</button>
+    <div id="notification"></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const energyDisplay = document.getElementById('energyDisplay');
+    const bombDisplay = document.getElementById('bombDisplay');
+    const weaponDisplay = document.getElementById('weaponDisplay');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const levelDisplay = document.getElementById('levelDisplay');
+    const joystick = document.getElementById('joystick');
+    const joystickKnob = document.getElementById('joystickKnob');
+    const bombButton = document.getElementById('bombButton');
+    const notification = document.getElementById('notification');
+
+    const images = {};
+    const imageFiles = [
+      'turret', 'bullet_normal', 'bullet_shotgun', 'bullet_laser', 'missile',
+      'enemy_normal', 'enemy_fast', 'enemy_strong', 'enemy_elite',
+      'item_speedup', 'item_firerate', 'item_bulletspeed', 'item_energy',
+      'item_shotgun', 'item_laser', 'item_missile', 'item_bomb', 'item_omnidirectional',
+      'explosion', 'background1', 'background2', 'background3', 'background4',
+      'game_logo', 'game_over'
+    ];
+
+    const sounds = {
+      bgm: new Audio('images/bgm.mp3'),
+      bgm2: new Audio('images/bgm2.mp3'),
+      bgm3: new Audio('images/bgm3.mp3'),
+      bgm4: new Audio('images/bgm4.mp3'),
+      zombie: new Audio('images/zombie.mp3'),
+      levelup: new Audio('images/levelup.mp3'),
+      bomb: new Audio('images/bomb.mp3'),
+      ending: new Audio('images/ending.mp3'),
+      item: new Audio('images/item.mp3'),
+      uk: new Audio('images/uk.mp3'),
+      shotgun: new Audio('images/shotgun.mp3'),
+      laser: new Audio('images/laser.mp3'),
+      omni: new Audio('images/omni.mp3'),
+      missile: new Audio('images/missile.mp3')
+    };
+
+    let currentBGM = sounds.bgm;
+    let gameLoop;
+    let turret, bullets, enemies, items, explosions;
+    let energy = 3;
+    let score = 0;
+    let bombs = 3;
+    let isGameOver = false;
+    let gameTime = 0;
+    let level = 1;
+
+    let enemySpawnRate = 0.02;
+    const maxEnemySpawnRate = 0.05;
+    const enemySpawnRateIncrease = 0.0005;
+
+    let isMobile = false;
+    let joystickActive = false;
+    let joystickAngle = 0;
+
+    function showLoadingScreen() {
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('게임 로딩중...', canvas.width / 2, canvas.height / 2);
+    }
+
+    function loadImages(callback) {
+      let loadedImages = 0;
+      const totalImages = imageFiles.length;
+
+      showLoadingScreen();
+
+      imageFiles.forEach(file => {
+        images[file] = new Image();
+        images[file].onload = () => {
+          loadedImages++;
+          if (loadedImages === totalImages) {
+            callback();
+          } else {
+            const progress = Math.floor((loadedImages / totalImages) * 100);
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillText(`게임 로딩중... ${progress}%`, canvas.width / 2, canvas.height / 2);
+          }
+        };
+        images[file].onerror = () => {
+          console.error(`Failed to load image: ${file}`);
+          loadedImages++;
+          if (loadedImages === totalImages) {
+            callback();
+          }
+        };
+        images[file].src = `images/${file}.png`;
+      });
+    }
+
+    class Turret {
+      constructor() {
+        this.x = canvas.width / 2;
+        this.y = canvas.height / 2;
+        this.radius = 20;
+        this.angle = 0;
+        this.speed = 2; // 초기 속도를 낮춤
+        this.bulletSpeed = 5; // 초기 총알 속도를 낮춤
+        this.fireRate = 1000; // 초기 발사 속도를 낮춤 (1초에 1발)
+        this.lastFired = 0;
+        this.weapon = 'missile'; // 초기 무기를 미사일로 설정
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.drawImage(images.turret, -images.turret.width / 2, -images.turret.height / 2);
+        ctx.restore();
+      }
+
+      move(direction) {
+        switch (direction) {
+          case 'left':
+            if (this.x > this.radius) this.x -= this.speed;
+            break;
+          case 'right':
+            if (this.x < canvas.width - this.radius) this.x += this.speed;
+            break;
+          case 'up':
+            if (this.y > this.radius) this.y -= this.speed;
+            break;
+          case 'down':
+            if (this.y < canvas.height - this.radius) this.y += this.speed;
+            break;
+        }
+      }
+
+      aim(mouseX, mouseY) {
+        this.angle = Math.atan2(mouseY - this.y, mouseX - this.x);
+      }
+
+      fire() {
+        const now = Date.now();
+        if (now - this.lastFired >= this.fireRate) {
+          let sound;
+          switch (this.weapon) {
+            case 'normal':
+              bullets.push(new Bullet(this.x, this.y, this.angle, this.bulletSpeed, 'normal'));
+              break;
+            case 'shotgun':
+              for (let i = -1; i <= 1; i++) {
+                bullets.push(new Bullet(this.x, this.y, this.angle + i * 0.2, this.bulletSpeed, 'shotgun'));
+              }
+              sound = sounds.shotgun;
+              break;
+            case 'laser':
+              bullets.push(new Bullet(this.x, this.y, this.angle, this.bulletSpeed * 2, 'laser'));
+              sound = sounds.laser;
+
+              break;
+            case 'missile':
+              if (bullets.filter(b => b instanceof Missile).length < 3) {
+                bullets.push(new Missile(this.x, this.y, this.angle, this.bulletSpeed * 0.5));
+              }
+              // sound = sounds.missile;
+
+              break;
+            case 'omnidirectional':
+              for (let i = 0; i < 8; i++) {
+                const angle = i * Math.PI / 4;
+                bullets.push(new Bullet(this.x, this.y, angle, this.bulletSpeed, 'normal'));
+              }
+              // sound = sounds.omni;
+
+              break;
+          }
+          this.lastFired = now;
+          // 사운드 재생
+          if (sound) {
+            sound.currentTime = 0;
+            sound.play().catch((error) => {
+              console.log(`Failed to play ${this.weapon} sound:`, error);
+            });
+          }
+        }
+      }
+
+      useBomb() {
+        if (bombs > 0) {
+          bombs--;
+          sounds.bomb.play();
+          explosions.push(new Explosion(canvas.width / 2, canvas.height / 2, 0, canvas.width * 1.5));
+          enemies = [];
+          updateDisplays();
+        }
+      }
+    }
+
+    class Bullet {
+      constructor(x, y, angle, speed, type) {
+        this.x = x;
+        this.y = y;
+        this.angle = angle;
+        this.speed = speed;
+        this.type = type;
+        this.radius = 5; // Add radius for collision detection
+        this.isPlayerBullet = true;
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        let image;
+        switch (this.type) {
+          case 'normal': image = images.bullet_normal; break;
+          case 'shotgun': image = images.bullet_shotgun; break;
+          case 'laser': image = images.bullet_laser; break;
+          default: image = images.bullet_normal;
+        }
+        ctx.drawImage(image, -image.width / 2, -image.height / 2);
+        ctx.restore();
+      }
+
+      update() {
+        this.x += Math.cos(this.angle) * this.speed;
+        this.y += Math.sin(this.angle) * this.speed;
+      }
+    }
+
+    class Missile extends Bullet {
+      constructor(x, y, angle, speed) {
+        super(x, y, angle, speed, 'missile');
+        this.targetEnemy = null;
+      }
+
+      update() {
+        if (!this.targetEnemy || !enemies.includes(this.targetEnemy)) {
+          this.targetEnemy = enemies.reduce((closest, enemy) => {
+            const distance = Math.hypot(enemy.x - this.x, enemy.y - this.y);
+            return closest && Math.hypot(closest.x - this.x, closest.y - this.y) < distance ? closest : enemy;
+          }, null);
+        }
+
+        if (this.targetEnemy) {
+          const dx = this.targetEnemy.x - this.x;
+          const dy = this.targetEnemy.y - this.y;
+          this.angle = Math.atan2(dy, dx);
+        }
+
+        super.update();
+      }
+
+      draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+        ctx.drawImage(images.missile, -images.missile.width / 2, -images.missile.height / 2);
+        ctx.restore();
+      }
+    }
+
+    class Enemy {
+      constructor(type = 'normal') {
+        this.radius = 15;
+        this.setRandomPosition();
+        this.type = type;
+        this.setProperties();
+        this.facingLeft = false;
+        this.hitEffect = false;
+      }
+
+      setRandomPosition() {
+        const side = Math.floor(Math.random() * 4);
+        switch (side) {
+          case 0: // Top
+            this.x = Math.random() * canvas.width;
+            this.y = -this.radius;
+            break;
+          case 1: // Right
+            this.x = canvas.width + this.radius;
+            this.y = Math.random() * canvas.height;
+            break;
+          case 2: // Bottom
+            this.x = Math.random() * canvas.width;
+            this.y = canvas.height + this.radius;
+            break;
+          case 3: // Left
+            this.x = -this.radius;
+            this.y = Math.random() * canvas.height;
+            break;
+        }
+      }
+
+      setProperties() {
+        switch (this.type) {
+          case 'normal':
+            this.speed = 0.3;
+            this.health = 1;
+            break;
+          case 'fast':
+            this.speed = 2.5;
+            this.health = 1;
+            break;
+          case 'strong':
+            this.speed = 1.5;
+            this.health = 3;
+            break;
+          case 'elite':
+            this.speed = 2;
+            this.health = 5;
+            this.radius = 20;
+            break;
+        }
+      }
+
+      draw() {
+        let image;
+        if (this.hitEffect) {
+          image = images.explosion;
+        } else {
+          switch (this.type) {
+            case 'normal': image = images.enemy_normal; break;
+            case 'fast': image = images.enemy_fast; break;
+            case 'strong': image = images.enemy_strong; break;
+            case 'elite': image = images.enemy_elite; break;
+            default: image = images.enemy_normal;
+          }
+        }
+        ctx.save();
+        if (this.facingLeft) {
+          ctx.scale(-1, 1);
+          ctx.drawImage(image, -this.x - image.width / 2, this.y - image.height / 2);
+        } else {
+          ctx.drawImage(image, this.x - image.width / 2, this.y - image.height / 2);
+        }
+        ctx.restore();
+
+        if (this.health > 1) {
+          ctx.fillStyle = 'white';
+          ctx.fillRect(this.x - this.radius, this.y - this.radius - 10, this.radius * 2, 5);
+          ctx.fillStyle = 'green';
+          ctx.fillRect(this.x - this.radius, this.y - this.radius - 10, (this.health / (this.type === 'elite' ? 5 : 3)) * this.radius * 2, 5);
+        }
+      }
+
+      update() {
+        const dx = turret.x - this.x;
+        const dy = turret.y - this.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        this.x += (dx / distance) * this.speed;
+        this.y += (dy / distance) * this.speed;
+
+        // 플레이어를 바라보는 방향 업데이트
+        this.facingLeft = dx < 0;
+      }
+
+      hit() {
+        this.health--;
+        this.hitEffect = true;
+        setTimeout(() => {
+          this.hitEffect = false;
+        }, 100);
+        sounds.zombie.play().catch((error) => {
+          console.log("Failed to play zombie sound:", error);
+        });
+        return this.health <= 0;
+      }
+    }
+
+    class Item {
+      constructor() {
+        this.x = Math.random() * (canvas.width - 40) + 20;
+        this.y = Math.random() * (canvas.height - 40) + 20;
+        this.radius = 10;
+        this.type = this.randomType();
+      }
+
+      draw() {
+        let image = images[`item_${this.type}`];
+        ctx.drawImage(image, this.x - image.width / 2, this.y - image.height / 2);
+      }
+
+      randomType() {
+        const types = ['speedup', 'firerate', 'bulletspeed', 'energy', 'shotgun', 'laser', 'missile', 'bomb', 'omnidirectional'];
+        return types[Math.floor(Math.random() * types.length)];
+      }
+
+      apply(turret) {
+        let effectMessage = '';
+        switch (this.type) {
+          case 'speedup':
+            turret.speed = Math.min(8, turret.speed + 1); // 최대 속도 제한
+            effectMessage = '이동 속도 증가!';
+            break;
+          case 'firerate':
+            turret.fireRate = Math.max(100, turret.fireRate - 100); // 최소 발사 간격 제한
+            effectMessage = '발사 속도 증가!';
+            break;
+          case 'bulletspeed':
+            turret.bulletSpeed = Math.min(15, turret.bulletSpeed + 1); // 최대 총알 속도 제한
+            effectMessage = '총알 속도 증가!';
+            break;
+          case 'energy':
+            energy = Math.min(15, energy + 1);
+            effectMessage = '에너지 증가!';
+            break;
+          case 'shotgun':
+          case 'laser':
+          case 'missile':
+          case 'omnidirectional':
+            turret.weapon = this.type;
+            effectMessage = `${this.type} 무기 획득!`;
+            break;
+          case 'bomb':
+            bombs++;
+            effectMessage = '폭탄 획득!';
+            break;
+        }
+        showNotification(effectMessage);
+        updateDisplays();
+
+        // item 사운드 재생
+        sounds.item.currentTime = 0;
+        sounds.item.play().catch((error) => {
+          console.log("Failed to play item sound:", error);
+        });
+      }
+    }
+
+    class Explosion {
+      constructor(x, y, startRadius, endRadius) {
+        this.x = x;
+        this.y = y;
+        this.radius = startRadius;
+        this.endRadius = endRadius;
+        this.alpha = 1;
+      }
+
+      draw() {
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(231, 76, 60, 0.5)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      update() {
+        this.radius += (this.endRadius - this.radius) * 0.1;
+        this.alpha -= 0.02;
+        return this.alpha > 0;
+      }
+    }
+
+    function init() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      turret = new Turret();
+      bullets = [];
+      enemies = [];
+      items = [];
+      explosions = [];
+      energy = 3;
+      score = 0;
+      bombs = 3;
+      gameTime = 0;
+      level = 1;
+      isGameOver = false;
+      enemySpawnRate = 0.02;
+      updateDisplays();
+      checkMobile();
+    }
+
+    function checkMobile() {
+      isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      if (isMobile) {
+        joystick.style.display = 'block';
+        bombButton.style.display = 'block';
+      }
+    }
+
+    function updateDisplays() {
+      energyDisplay.textContent = `에너지: ${energy}`;
+      bombDisplay.textContent = `폭탄: ${bombs}`;
+      weaponDisplay.textContent = `무기: ${turret.weapon}`;
+      scoreDisplay.textContent = `점수: ${score}`;
+      const totalSeconds = Math.floor(gameTime / 60);
+      const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+      const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+      timerDisplay.textContent = `${minutes}:${seconds}`;
+      levelDisplay.textContent = `레벨: ${level}`;
+      weaponDisplay.textContent = `무기: ${getWeaponName(turret.weapon)}`;
+    }
+
+    function getWeaponName(weapon) {
+      switch (weapon) {
+        case 'normal': return '일반';
+        case 'shotgun': return '샷건';
+        case 'laser': return '레이저';
+        case 'missile': return '미사일';
+        case 'omnidirectional': return '전방위';
+        default: return weapon;
+      }
+    }
+    function createEnemy() {
+      let enemyType;
+      const randomValue = Math.random();
+      switch (level) {
+        case 1:
+          enemyType = 'normal';
+          break;
+        case 2:
+          enemyType = randomValue < 0.7 ? 'normal' : 'fast';
+          break;
+        case 3:
+          enemyType = randomValue < 0.5 ? 'normal' : (randomValue < 0.8 ? 'fast' : 'strong');
+          break;
+        default:
+          enemyType = randomValue < 0.3 ? 'normal' : (randomValue < 0.5 ? 'fast' : (randomValue < 0.7 ? 'strong' : 'elite'));
+          break;
+      }
+      enemies.push(new Enemy(enemyType));
+    }
+
+    function showNotification(message) {
+      notification.textContent = message;
+      notification.style.opacity = '1';
+      setTimeout(() => {
+        notification.style.opacity = '0';
+      }, 2000);
+    }
+
+    function update() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 배경 그리기
+      let backgroundImage;
+      if (level <= 4) {
+        backgroundImage = images[`background${level}`];
+      } else {
+        backgroundImage = images.background4;
+      }
+      ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+
+      gameTime++;
+
+      // 레벨 업데이트
+      if (score >= 150 && level < 4) {
+        level = 4;
+        changeBackground('images/background4');
+        sounds.bgm4.play();
+        currentBGM.pause();
+        currentBGM = sounds.bgm4;
+        currentBGM.play();
+        showNotification('레벨 4 달성!');
+        sounds.levelup.play();
+      } else if (score >= 100 && level < 3) {
+        level = 3;
+        changeBackground('images/background3');
+        sounds.bgm3.play();
+        currentBGM.pause();
+        currentBGM = sounds.bgm3;
+        currentBGM.play();
+        showNotification('레벨 3 달성!');
+        sounds.levelup.play();
+      } else if (score >= 50 && level < 2) {
+        level = 2;
+        changeBackground('images/background2');
+        sounds.bgm2.play();
+        currentBGM.pause();
+        currentBGM = sounds.bgm2;
+        currentBGM.play();
+        showNotification('레벨 2 달성!');
+        sounds.levelup.play();
+      }
+
+      if (isMobile && joystickActive) {
+        turret.x += Math.cos(joystickAngle) * turret.speed;
+        turret.y += Math.sin(joystickAngle) * turret.speed;
+        turret.x = Math.max(turret.radius, Math.min(canvas.width - turret.radius, turret.x));
+        turret.y = Math.max(turret.radius, Math.min(canvas.height - turret.radius, turret.y));
+        turret.angle = joystickAngle;
+      }
+
+      turret.draw();
+      turret.fire();
+
+      bullets = bullets.filter((bullet) => {
+        bullet.update();
+        bullet.draw();
+
+        if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+          return false;
+        }
+
+        if (!bullet.isPlayerBullet) {
+          const dx = bullet.x - turret.x;
+          const dy = bullet.y - turret.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < turret.radius + bullet.radius) {
+            energy--;
+            updateDisplays();
+            if (energy <= 0) {
+              gameOver();
+            }
+            return false;
+          }
+        }
+        return true;
+      });
+
+      enemies = enemies.filter((enemy) => {
+        enemy.update();
+        enemy.draw();
+
+        const dx = turret.x - enemy.x;
+        const dy = turret.y - enemy.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < turret.radius + enemy.radius) {
+          energy--;
+          updateDisplays();
+          // uk 사운드 재생
+          sounds.uk.currentTime = 0;
+          sounds.uk.play().catch((error) => {
+            console.log("Failed to play uk sound:", error);
+          });
+          if (energy <= 0) {
+            gameOver();
+          }
+          return false;
+        }
+
+        let enemyDestroyed = false;
+        bullets = bullets.filter((bullet) => {
+          if (!bullet.isPlayerBullet) return true;
+          const dx = bullet.x - enemy.x;
+          const dy = bullet.y - enemy.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < bullet.radius + enemy.radius) {
+            if (enemy.hit()) {
+              enemyDestroyed = true;
+              score++;
+              updateDisplays();
+            }
+            return false; // 총알 제거
+          }
+          return true; // 총알 유지
+        });
+
+        return !enemyDestroyed; // 적이 죽지 않았으면 유지, 죽었으면 제거
+      });
+
+      items = items.filter((item) => {
+        item.draw();
+
+        const dx = turret.x - item.x;
+        const dy = turret.y - item.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < turret.radius + item.radius) {
+          item.apply(turret);
+          return false;
+        }
+        return true;
+      });
+
+      explosions = explosions.filter(explosion => {
+        explosion.draw();
+        return explosion.update();
+      });
+
+      if (Math.random() < enemySpawnRate * (1 + (level - 1) * 0.2)) {
+        createEnemy();
+      }
+
+      if (Math.random() < 0.002 && items.length < 3) {
+        items.push(new Item());
+      }
+
+      updateDisplays();
+    }
+
+    function changeBackground(imageSrc) {
+      const backgroundImage = new Image();
+      backgroundImage.src = imageSrc;
+      backgroundImage.onload = () => {
+        const transitionOverlay = document.createElement('div');
+        transitionOverlay.style.position = 'absolute';
+        transitionOverlay.style.top = 0;
+        transitionOverlay.style.left = 0;
+        transitionOverlay.style.width = '100%';
+        transitionOverlay.style.height = '100%';
+        transitionOverlay.style.backgroundImage = `url(${imageSrc})`;
+        transitionOverlay.style.backgroundSize = 'cover';
+        transitionOverlay.style.transition = 'opacity 1s ease-in-out';
+        document.getElementById('gameContainer').appendChild(transitionOverlay);
+        setTimeout(() => {
+          transitionOverlay.style.opacity = '0';
+          setTimeout(() => {
+            document.getElementById('gameContainer').removeChild(transitionOverlay);
+          }, 1000);
+        }, 1000);
+      };
+    }
+
+    function gameOver() {
+      isGameOver = true;
+      clearInterval(gameLoop);
+      currentBGM.pause();
+      sounds.ending.play();
+      Swal.fire({
+        title: '게임 오버!',
+        text: `최종 점수: ${score}`,
+        imageUrl: images.game_over.src,
+        imageWidth: 400,
+        imageHeight: 200,
+        confirmButtonText: '다시 시작',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+      }).then((result) => {
+        if (result.isConfirmed) {
+          startGame();
+        }
+      });
+    }
+
+    function startGame() {
+      loadImages(() => {
+        init();
+        currentBGM.play();
+        gameLoop = setInterval(update, 1000 / 60);
+      });
+    }
+
+    function showStartPopup() {
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const instructions = isMobile ?
+        '- 조이스틱으로 이동<br>- 자동 발사<br>- 오른쪽 하단 버튼으로 폭탄 사용' :
+        '- WASD 또는 화살표 키로 이동<br>- 마우스로 조준 및 클릭하여 발사<br>- 스페이스바 또는 마우스 우클릭으로 폭탄 사용';
+
+      Swal.fire({
+        title: '좀비탕탕!!',
+        imageUrl: images.game_logo.src,
+        imageWidth: 400,
+        imageHeight: 200,
+        html: `게임 방법:<br>${instructions}<br><br>준비되셨나요?`,
+        confirmButtonText: '게임 시작!',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+      }).then((result) => {
+        if (result.isConfirmed) {
+          startGame();
+        }
+      });
+    }
+
+    // PC 컨트롤
+    document.addEventListener('keydown', (e) => {
+      if (!turret) return;
+      if (e.key === 'ArrowLeft' || e.key === 'a') turret.move('left');
+      if (e.key === 'ArrowRight' || e.key === 'd') turret.move('right');
+      if (e.key === 'ArrowUp' || e.key === 'w') turret.move('up');
+      if (e.key === 'ArrowDown' || e.key === 's') turret.move('down');
+      if (e.key === ' ') turret.useBomb();
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!turret || isMobile) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      turret.aim(mouseX, mouseY);
+    });
+
+    canvas.addEventListener('click', (e) => {
+      if (!turret || isMobile) return;
+      turret.fire();
+    });
+
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!turret || isMobile) return;
+      turret.useBomb();
+    });
+
+    // 모바일 컨트롤
+    joystick.addEventListener('touchstart', handleJoystickStart);
+    joystick.addEventListener('touchmove', handleJoystickMove);
+    joystick.addEventListener('touchend', handleJoystickEnd);
+
+    function handleJoystickStart(e) {
+      joystickActive = true;
+      handleJoystickMove(e);
+    }
+
+    function handleJoystickMove(e) {
+      if (!joystickActive) return;
+      const touch = e.touches[0];
+      const joystickRect = joystick.getBoundingClientRect();
+      const centerX = joystickRect.left + joystickRect.width / 2;
+      const centerY = joystickRect.top + joystickRect.height / 2;
+      const dx = touch.clientX - centerX;
+      const dy = touch.clientY - centerY;
+      joystickAngle = Math.atan2(dy, dx);
+      const distance = Math.min(joystickRect.width / 2, Math.hypot(dx, dy));
+      const knobX = Math.cos(joystickAngle) * distance;
+      const knobY = Math.sin(joystickAngle) * distance;
+      joystickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+    }
+
+    function handleJoystickEnd() {
+      joystickActive = false;
+      joystickKnob.style.transform = 'translate(-50%, -50%)';
+    }
+
+    bombButton.addEventListener('click', () => {
+      if (turret) turret.useBomb();
+    });
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      if (turret) {
+        turret.x = canvas.width / 2;
+        turret.y = canvas.height / 2;
+      }
+    });
+
+    loadImages(() => {
+      showStartPopup();
+    });
+    async function preloadAllAudio() {
+      for (let sound in sounds) {
+        await preloadAudio(sounds[sound]);
+      }
+      console.log('All audio files loaded');
+    }
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/service-worker.js').then(function(registration) {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, function(error) {
+          console.log('ServiceWorker registration failed: ', error);
+        });
+      });
+    }
+  </script>
+</body>
+
+</html>
